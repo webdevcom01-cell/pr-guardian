@@ -1,0 +1,84 @@
+generator client {
+  provider      = "prisma-client-js"
+  output        = "../src/generated/prisma"
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id          String   @id @default(cuid())
+  githubId    String   @unique
+  githubToken String   @db.Text
+  name        String?
+  email       String?
+  avatar      String?
+  login       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  repos Repository[]
+
+  @@index([githubId])
+}
+
+model Repository {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  githubId      Int      @unique
+  fullName      String
+  description   String?
+  webhookId     Int?
+  webhookSecret String
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  pullRequests PullRequest[]
+
+  @@index([userId])
+  @@index([fullName])
+}
+
+model PullRequest {
+  id         String     @id @default(cuid())
+  repoId     String
+  repo       Repository @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  prNumber   Int
+  title      String
+  author     String
+  headSha    String
+  baseBranch String
+  headBranch String
+  prUrl      String
+  createdAt  DateTime   @default(now())
+
+  reviews Review[]
+
+  @@unique([repoId, prNumber, headSha])
+  @@index([repoId])
+}
+
+model Review {
+  id              String      @id @default(cuid())
+  pullRequestId   String
+  pullRequest     PullRequest @relation(fields: [pullRequestId], references: [id], onDelete: Cascade)
+  decision        String
+  compositeScore  Int
+  securityScore   Int
+  qualityScore    Int
+  issues          Json
+  summary         String      @db.Text
+  githubCommentId Int?
+  durationMs      Int
+  modelUsed       String
+  createdAt       DateTime    @default(now())
+
+  @@index([pullRequestId])
+  @@index([createdAt])
+}

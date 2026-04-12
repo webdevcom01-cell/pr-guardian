@@ -1,0 +1,90 @@
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { verifyWebhookSignature } from "@/lib/github";
+import { addReviewJob } from "@/lib/queue";
+
+export async function POST(req: NextRequest) {
+  const signature = req.headers.get("x-hub-signature-256") ?? "";
+  const event = req.headers.get("x-github-event") ?? "";
+  const rawBody = await req.text();
+
+  if (event !== "pull_request") {
+    return NextResponse.json({ ignored: true, event });
+  }
+
+  let payload: {
+    action: string;
+    repository: { id: number; full_name: string };
+    pull_request: {
+      number: number;
+      title: string;
+      user: { login: string };
+      head: { sha: string; ref: string };
+      base: { ref: string };
+      html_url: string;
+    };
+  };
+
+  try {
+    payload = JSON.parse(rawBody) as typeof payload;
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  const { action, repository, pull_request: pr } = payload;
+  if (!["opened", "synchronize", "reopened"].includes(action)) {
+    return NextResponse.json({ ignored: true, action });
+  }
+
+  // Find the connected repo
+  const repo = await prisma.repository.findUnique({
+    where: { githubId: repository.id },
+    include: { user: { select: { githubToken: true } } },
+  });
+
+  if (!repo || !repo.isActive) {
+    return NextResponse.json({ ignored: true, reason: "repo not connected" });
+  }
+
+  // Verify HMAC signature
+  if (!verifyWebhookSignature(rawBody, signature, repo.webhookSecret)) {
+    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+  }
+
+  const [owner, repoName] = repository.full_name.split("/");
+
+  // Upsert PullRequest record
+  const pullRequest = await prisma.pullRequest.upsert({
+    where: {
+      repoId_prNumber_headSha: {
+        repoId: repo.id,
+        prNumber: pr.number,
+        headSha: pr.head.sha,
+      },
+    },
+    update: {},
+    create: {
+      repoId: repo.id,
+      prNumber: pr.number,
+      title: pr.title,
+      author: pr.user.login,
+      headSha: pr.head.sha,
+      baseBranch: pr.base.ref,
+      headBranch: pr.head.ref,
+      prUrl: pr.html_url,
+    },
+  });
+
+  // Enqueue review job
+  await addReviewJob({
+    repoId: repo.id,
+    pullRequestId: pullRequest.id,
+    owner,
+    repo: repoName,
+    prNumber: pr.number,
+    headSha: pr.head.sha,
+    userToken: repo.user.githubToken,
+  });
+
+  return NextResponse.json({ queued: true, pullRequestId: pullRequest.id });
+}

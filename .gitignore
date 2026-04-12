@@ -1,0 +1,10 @@
+.env
+.env.local
+.env*.local
+node_modules/
+.next/
+dist/
+.pnpm-store/
+*.log
+.DS_Store
+src/generated/
