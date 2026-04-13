@@ -2,10 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyWebhookSignature } from "@/lib/github";
 import { addReviewJob } from "@/lib/queue";
+import { logger } from "@/lib/logger";
 
 export async function POST(req: NextRequest) {
   const signature = req.headers.get("x-hub-signature-256") ?? "";
   const event = req.headers.get("x-github-event") ?? "";
+  const deliveryId = req.headers.get("x-github-delivery") ?? "unknown";
   const rawBody = await req.text();
 
   if (event !== "pull_request") {
@@ -48,6 +50,10 @@ export async function POST(req: NextRequest) {
 
   // Verify HMAC signature
   if (!verifyWebhookSignature(rawBody, signature, repo.webhookSecret)) {
+    logger.warn("Webhook signature verification failed", {
+      deliveryId,
+      repoFullName: repository.full_name,
+    });
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
 
@@ -75,15 +81,51 @@ export async function POST(req: NextRequest) {
     },
   });
 
+  // Race condition guard: check if a review already exists for this PR+SHA
+  const existingReview = await prisma.review.findFirst({
+    where: { pullRequestId: pullRequest.id },
+    select: { id: true },
+  });
+
+  if (existingReview) {
+    logger.info("Review already exists, skipping duplicate webhook", {
+      deliveryId,
+      pullRequestId: pullRequest.id,
+      existingReviewId: existingReview.id,
+    });
+    return NextResponse.json({
+      ignored: true,
+      reason: "review already exists",
+      reviewId: existingReview.id,
+    });
+  }
+
   // Enqueue review job
-  await addReviewJob({
-    repoId: repo.id,
+  try {
+    await addReviewJob({
+      repoId: repo.id,
+      pullRequestId: pullRequest.id,
+      owner,
+      repo: repoName,
+      prNumber: pr.number,
+      headSha: pr.head.sha,
+      userToken: repo.user.githubToken,
+    });
+  } catch (error) {
+    logger.error("Failed to enqueue review job", {
+      deliveryId,
+      pullRequestId: pullRequest.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return NextResponse.json({ error: "Failed to enqueue review" }, { status: 500 });
+  }
+
+  logger.info("Webhook processed, review enqueued", {
+    deliveryId,
     pullRequestId: pullRequest.id,
-    owner,
-    repo: repoName,
+    repoFullName: repository.full_name,
     prNumber: pr.number,
-    headSha: pr.head.sha,
-    userToken: repo.user.githubToken,
+    action,
   });
 
   return NextResponse.json({ queued: true, pullRequestId: pullRequest.id });

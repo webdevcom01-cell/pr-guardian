@@ -1,7 +1,11 @@
 import { Worker, type Job } from "bullmq";
 import type { JobData, ReviewJobData } from "./index";
+import { logger } from "@/lib/logger";
 
 const QUEUE_NAME = "pr-guardian";
+
+/** Per-job timeout: 5 minutes max for AI review */
+const JOB_TIMEOUT_MS = 5 * 60 * 1000;
 
 function getConnection() {
   const url = process.env.REDIS_URL;
@@ -10,19 +14,47 @@ function getConnection() {
 }
 
 async function processReviewJob(job: Job<ReviewJobData>): Promise<unknown> {
-  console.log(`[worker] Processing review job ${job.id}`, job.data);
-  const { runReview } = await import("@/lib/reviewer");
-  const reviewId = await runReview({
+  logger.info("Processing review job", {
+    jobId: job.id,
     repoId: job.data.repoId,
-    pullRequestId: job.data.pullRequestId,
-    owner: job.data.owner,
-    repo: job.data.repo,
     prNumber: job.data.prNumber,
-    headSha: job.data.headSha,
-    userToken: job.data.userToken,
+    pullRequestId: job.data.pullRequestId,
   });
-  console.log(`[worker] Review completed: ${reviewId}`);
-  return { reviewId };
+
+  const startedAt = Date.now();
+
+  // Timeout guard: abort if job takes too long
+  const ac = new AbortController();
+  const timeoutId = setTimeout(() => ac.abort(), JOB_TIMEOUT_MS);
+
+  try {
+    const { runReview } = await import("@/lib/reviewer");
+
+    // Wrap in a race to enforce timeout
+    const reviewId = await Promise.race([
+      runReview({
+        repoId: job.data.repoId,
+        pullRequestId: job.data.pullRequestId,
+        owner: job.data.owner,
+        repo: job.data.repo,
+        prNumber: job.data.prNumber,
+        headSha: job.data.headSha,
+        userToken: job.data.userToken,
+      }),
+      new Promise<never>((_resolve, reject) => {
+        ac.signal.addEventListener("abort", () =>
+          reject(new Error(`Review job timed out after ${JOB_TIMEOUT_MS / 1000}s`))
+        );
+      }),
+    ]);
+
+    const durationMs = Date.now() - startedAt;
+    logger.info("Review completed", { jobId: job.id, reviewId, durationMs });
+
+    return { reviewId };
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 const worker = new Worker<JobData>(
@@ -32,7 +64,7 @@ const worker = new Worker<JobData>(
       case "review.run":
         return processReviewJob(job as Job<ReviewJobData>);
       default:
-        console.warn(`[worker] Unknown job type: ${(job.data as JobData).type}`);
+        logger.warn("Unknown job type", { jobId: job.id, type: (job.data as JobData).type });
     }
   },
   {
@@ -42,11 +74,28 @@ const worker = new Worker<JobData>(
 );
 
 worker.on("completed", (job) => {
-  console.log(`[worker] Job ${job.id} completed`);
+  logger.info("Job completed", { jobId: job.id });
 });
 
 worker.on("failed", (job, err) => {
-  console.error(`[worker] Job ${job?.id} failed:`, err.message);
+  logger.error("Job failed", {
+    jobId: job?.id,
+    error: err.message,
+    attempt: job?.attemptsMade,
+    maxAttempts: job?.opts?.attempts,
+  });
 });
 
-console.log("[worker] PR Guardian worker started");
+// Graceful shutdown
+function shutdown() {
+  logger.info("Worker shutting down...");
+  worker.close().then(() => {
+    logger.info("Worker stopped");
+    process.exit(0);
+  });
+}
+
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
+
+logger.info("PR Guardian worker started", { concurrency: 3 });

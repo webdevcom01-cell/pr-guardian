@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getModel, getModelName } from "@/lib/ai";
 import { getPRDiff, postPRComment, formatReviewComment } from "@/lib/github";
 import { prisma } from "@/lib/prisma";
+import { logger } from "@/lib/logger";
 
 const ReviewIssueSchema = z.object({
   severity: z.enum(["CRITICAL", "HIGH", "MEDIUM", "LOW"]),
@@ -56,11 +57,19 @@ export async function runReview(input: ReviewJobInput): Promise<string> {
   const diff = await getPRDiff(input.owner, input.repo, input.prNumber, input.userToken);
 
   if (!diff || diff.trim().length === 0) {
+    logger.info("Empty diff, skipping review", { pullRequestId: input.pullRequestId });
     return "empty-diff";
   }
 
   // Truncate extremely large diffs to avoid token limits
-  const truncatedDiff = diff.length > 80_000 ? diff.slice(0, 80_000) + "\n\n[diff truncated]" : diff;
+  const wasTruncated = diff.length > 80_000;
+  const truncatedDiff = wasTruncated ? diff.slice(0, 80_000) + "\n\n[diff truncated]" : diff;
+  if (wasTruncated) {
+    logger.warn("Diff truncated for review", {
+      pullRequestId: input.pullRequestId,
+      originalLength: diff.length,
+    });
+  }
 
   // 2. Run AI review
   const model = getModel();

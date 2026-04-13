@@ -40,12 +40,14 @@ export default function ReposPage() {
 
   async function openAdd() {
     setShowAdd(true);
-    const res = await fetch("https://api.github.com/user/repos?per_page=100&sort=updated", {
-      headers: { Authorization: `token ${document.cookie}` },
-    });
-    if (!res.ok) return;
-    const data = await res.json() as GitHubRepo[];
-    setGhRepos(data);
+    try {
+      const res = await fetch("/api/repos/github");
+      if (!res.ok) return;
+      const json = await res.json() as { success: boolean; data: GitHubRepo[] };
+      setGhRepos(json.data ?? []);
+    } catch {
+      // Silently fail — user can retry by reopening the modal
+    }
   }
 
   async function connectRepo(ghRepo: GitHubRepo) {

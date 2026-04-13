@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { logger } from "@/lib/logger";
 
 export async function GET(
   _req: NextRequest,
@@ -12,21 +13,31 @@ export async function GET(
   }
 
   const { id } = await params;
-  const user = await prisma.user.findUnique({ where: { id: session.user.id } });
-  if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
-  const review = await prisma.review.findUnique({
-    where: { id },
-    include: {
-      pullRequest: {
-        include: { repo: { select: { fullName: true, userId: true } } },
+  try {
+    const user = await prisma.user.findUnique({ where: { id: session.user.id } });
+    if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
+
+    const review = await prisma.review.findUnique({
+      where: { id },
+      include: {
+        pullRequest: {
+          include: { repo: { select: { fullName: true, userId: true } } },
+        },
       },
-    },
-  });
+    });
 
-  if (!review || review.pullRequest.repo.userId !== user.id) {
-    return NextResponse.json({ error: "Review not found" }, { status: 404 });
+    if (!review || review.pullRequest.repo.userId !== user.id) {
+      return NextResponse.json({ error: "Review not found" }, { status: 404 });
+    }
+
+    return NextResponse.json({ success: true, data: review });
+  } catch (error) {
+    logger.error("Failed to fetch review", {
+      userId: session.user.id,
+      reviewId: id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return NextResponse.json({ error: "Failed to fetch review" }, { status: 500 });
   }
-
-  return NextResponse.json({ success: true, data: review });
 }
