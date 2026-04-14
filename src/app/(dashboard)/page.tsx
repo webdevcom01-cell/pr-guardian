@@ -2,12 +2,20 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { formatDate, decisionColor, decisionLabel, scoreColor } from "@/lib/utils";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { GitPullRequest, ShieldCheck, ShieldAlert, Clock } from "lucide-react";
 
 export default async function DashboardPage() {
   const session = await auth();
-  const user = await prisma.user.findUnique({ where: { id: session!.user.id } });
-  if (!user) return null;
+
+  if (!session?.user?.id) {
+    redirect("/login");
+  }
+
+  const user = await prisma.user.findUnique({ where: { id: session.user.id } });
+  if (!user) {
+    redirect("/login");
+  }
 
   const [repoCount, reviews] = await Promise.all([
     prisma.repository.count({ where: { userId: user.id, isActive: true } }),
