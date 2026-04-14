@@ -193,6 +193,8 @@ describe("POST /api/webhooks/github", () => {
   it("continues processing when Redis rate limit check fails (non-fatal)", async () => {
     mockFindUnique.mockResolvedValue(VALID_REPO);
     mockUpsert.mockResolvedValue({ id: "pr-db-1" });
+    mockFindFirst.mockResolvedValue(null);
+    mockAddReviewJob.mockResolvedValue(undefined);
     mockRedisIncr.mockRejectedValue(new Error("Redis down"));
 
     const req = makeRequest(VALID_PR_PAYLOAD);

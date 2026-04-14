@@ -91,6 +91,7 @@ describe("callWithFallback", () => {
   it("logs a warning for each failed model", async () => {
     const { logger } = await import("@/lib/logger");
     const warnSpy = vi.spyOn(logger, "warn");
+    warnSpy.mockClear(); // clear calls accumulated by earlier tests in this suite
 
     const fn = vi.fn()
       .mockRejectedValueOnce(new Error("fail 1"))
