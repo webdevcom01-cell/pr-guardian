@@ -1,63 +1,115 @@
-/* IBM Plex Sans — must be first */
+/* IBM Plex Sans */
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-@layer base {
-  :root {
-    --font-sans: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
-    --font-mono: 'IBM Plex Mono', 'Fira Code', monospace;
-  }
+/* ─── Design tokens ──────────────────────────────────────────── */
+:root {
+  /* Dark theme (default) */
+  --bg-0:    #000000;
+  --bg-1:    #0a0a0a;
+  --bg-2:    #111111;
+  --bg-3:    #171717;
+  --bg-input:#1c1c1c;
 
-  * { box-sizing: border-box; }
+  --text-0:  #ffffff;
+  --text-1:  #d4d4d8;
+  --text-2:  #71717a;
+  --text-3:  #3f3f46;
+
+  --border-0: rgba(255,255,255,0.06);
+  --border-1: rgba(255,255,255,0.04);
+
+  --btn-bg:   #ffffff;
+  --btn-text: #000000;
+  --btn-hover:#f0f0f0;
+
+  --shadow-card:
+    0 0 0 1px rgba(255,255,255,0.05),
+    0 2px 8px rgba(0,0,0,0.5),
+    inset 0 1px 0 rgba(255,255,255,0.03);
+
+  --shadow-raised:
+    0 0 0 1px rgba(255,255,255,0.04),
+    0 8px 32px rgba(0,0,0,0.7),
+    0 2px 8px rgba(0,0,0,0.4);
+
+  --shadow-btn:
+    0 1px 3px rgba(0,0,0,0.4),
+    0 4px 12px rgba(0,0,0,0.3);
+}
+
+[data-theme="light"] {
+  --bg-0:    #fafafa;
+  --bg-1:    #f0f0f0;
+  --bg-2:    #ffffff;
+  --bg-3:    #f7f7f7;
+  --bg-input:#f5f5f5;
+
+  --text-0:  #0a0a0a;
+  --text-1:  #404040;
+  --text-2:  #737373;
+  --text-3:  #b5b5b5;
+
+  --border-0: rgba(0,0,0,0.08);
+  --border-1: rgba(0,0,0,0.05);
+
+  --btn-bg:   #0a0a0a;
+  --btn-text: #ffffff;
+  --btn-hover:#1a1a1a;
+
+  --shadow-card:
+    0 0 0 1px rgba(0,0,0,0.07),
+    0 2px 8px rgba(0,0,0,0.05),
+    inset 0 1px 0 rgba(255,255,255,0.9);
+
+  --shadow-raised:
+    0 0 0 1px rgba(0,0,0,0.08),
+    0 8px 32px rgba(0,0,0,0.08),
+    0 2px 8px rgba(0,0,0,0.05);
+
+  --shadow-btn:
+    0 1px 3px rgba(0,0,0,0.15),
+    0 4px 12px rgba(0,0,0,0.08);
+}
+
+/* ─── Base ───────────────────────────────────────────────────── */
+@layer base {
+  :root { --font-sans: 'IBM Plex Sans', system-ui, sans-serif; }
+
+  *, *::before, *::after { box-sizing: border-box; }
 
   html {
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
     letter-spacing: -0.01em;
   }
 
   body {
-    background: #000;
-    color: #e4e4e7;
+    background: var(--bg-0);
+    color: var(--text-1);
+    transition: background 0.2s ease, color 0.2s ease;
   }
 
-  /* Elegant minimal scrollbar */
+  /* Scrollbar */
   ::-webkit-scrollbar { width: 4px; height: 4px; }
   ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 2px; }
-  ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
+  ::-webkit-scrollbar-thumb { background: var(--border-0); border-radius: 2px; }
 
-  /* Clean focus ring */
+  /* Focus */
   :focus-visible {
-    outline: 1.5px solid rgba(255,255,255,0.5);
+    outline: 1.5px solid var(--text-0);
     outline-offset: 3px;
     border-radius: 4px;
+    opacity: 0.5;
   }
 }
 
+/* ─── Utilities ──────────────────────────────────────────────── */
 @layer utilities {
-  .text-balance { text-wrap: balance; }
-
-  /* Card shadow — deep black lift */
-  .shadow-card {
-    box-shadow:
-      0 0 0 1px rgba(255,255,255,0.05),
-      0 2px 4px rgba(0,0,0,0.4),
-      0 8px 24px rgba(0,0,0,0.5);
-  }
-
-  /* Inset top highlight — glass effect */
-  .highlight-top {
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
-  }
-
-  /* Number font */
-  .font-tabular {
-    font-variant-numeric: tabular-nums;
-    letter-spacing: -0.03em;
-  }
+  .font-tabular { font-variant-numeric: tabular-nums; letter-spacing: -0.03em; }
+  .shadow-card  { box-shadow: var(--shadow-card); }
+  .shadow-raised { box-shadow: var(--shadow-raised); }
 }
