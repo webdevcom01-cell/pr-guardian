@@ -1,14 +1,15 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Shield, LayoutDashboard, GitBranch, LogOut, Sun, Moon } from "lucide-react";
+import { Shield, LayoutDashboard, GitBranch, BarChart2, LogOut, Sun, Moon } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { useTheme } from "@/app/providers";
 import { cn } from "@/lib/utils";
 
 const NAV = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/dashboard/repos", label: "Repositories", icon: GitBranch },
+  { href: "/dashboard",         label: "Dashboard",    icon: LayoutDashboard },
+  { href: "/dashboard/metrics", label: "Metrics",      icon: BarChart2       },
+  { href: "/dashboard/repos",   label: "Repositories", icon: GitBranch       },
 ];
 
 function Sidebar() {

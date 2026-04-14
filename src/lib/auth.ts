@@ -9,7 +9,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       clientSecret: process.env.AUTH_GITHUB_SECRET!,
       authorization: {
         params: {
-          scope: "read:user user:email repo",
+          // Minimal scope for public repos.
+          // Login page offers a separate "private repos" flow that requests full `repo` scope.
+          scope: "read:user user:email public_repo admin:repo_hook repo:status",
         },
       },
     }),

@@ -1,5 +1,12 @@
 import { signIn } from "@/lib/auth";
-import { Shield } from "lucide-react";
+import { Shield, Lock, Webhook, GitPullRequest, User } from "lucide-react";
+
+const PUBLIC_PERMISSIONS = [
+  { icon: GitPullRequest, label: "public_repo",       desc: "Post review comments on public repositories" },
+  { icon: Webhook,        label: "admin:repo_hook",   desc: "Create and remove webhooks" },
+  { icon: Shield,         label: "repo:status",       desc: "Post ✅/❌ commit status checks on PRs" },
+  { icon: User,           label: "read:user + email", desc: "Read your GitHub profile and email" },
+];
 
 export default function LoginPage() {
   return (
@@ -15,7 +22,7 @@ export default function LoginPage() {
         }}
       />
 
-      <div className="relative w-full max-w-[360px] px-5">
+      <div className="relative w-full max-w-[380px] px-5">
 
         {/* Logo */}
         <div className="mb-10 flex flex-col items-center gap-5">
@@ -40,10 +47,15 @@ export default function LoginPage() {
           className="rounded-2xl p-7"
           style={{ background: "var(--bg-2)", boxShadow: "var(--shadow-raised)" }}
         >
+          {/* Primary sign-in — public repos */}
           <form
             action={async () => {
               "use server";
-              await signIn("github", { redirectTo: "/dashboard" });
+              await signIn(
+                "github",
+                { redirectTo: "/dashboard" },
+                { scope: "read:user user:email public_repo admin:repo_hook repo:status" },
+              );
             }}
           >
             <button
@@ -62,42 +74,74 @@ export default function LoginPage() {
             </button>
           </form>
 
-          {/* Divider */}
-          <div className="my-6 flex items-center gap-3">
-            <div className="h-px flex-1" style={{ background: "var(--border-0)" }} />
-            <span className="text-[11px] font-medium uppercase tracking-widest" style={{ color: "var(--text-3)" }}>
-              What you get
-            </span>
-            <div className="h-px flex-1" style={{ background: "var(--border-0)" }} />
-          </div>
+          {/* Private repos option */}
+          <form
+            className="mt-2"
+            action={async () => {
+              "use server";
+              await signIn(
+                "github",
+                { redirectTo: "/dashboard" },
+                { scope: "read:user user:email repo" },
+              );
+            }}
+          >
+            <button
+              type="submit"
+              className="flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-xs font-medium transition-all duration-200"
+              style={{
+                background: "transparent",
+                color: "var(--text-2)",
+                border: "1px solid var(--border-0)",
+              }}
+            >
+              <Lock className="h-3.5 w-3.5" style={{ color: "var(--text-3)" }} />
+              I need access to private repositories
+            </button>
+          </form>
 
-          <ul className="space-y-3">
-            {[
-              "Automatic review on every PR opened",
-              "Security vulnerabilities & bug detection",
-              "Code quality score with actionable feedback",
-            ].map((item) => (
-              <li key={item} className="flex items-start gap-3">
-                <div
-                  className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full"
-                  style={{ border: "1px solid var(--border-0)" }}
-                >
+          {/* Permissions section */}
+          <div className="mt-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="h-px flex-1" style={{ background: "var(--border-0)" }} />
+              <span className="text-[11px] font-medium uppercase tracking-widest" style={{ color: "var(--text-3)" }}>
+                Permissions requested
+              </span>
+              <div className="h-px flex-1" style={{ background: "var(--border-0)" }} />
+            </div>
+
+            <ul className="space-y-3">
+              {PUBLIC_PERMISSIONS.map(({ icon: Icon, label, desc }) => (
+                <li key={label} className="flex items-start gap-3">
                   <div
-                    className="h-1.5 w-1.5 rounded-full"
-                    style={{ background: "var(--text-2)" }}
-                  />
-                </div>
-                <span className="text-xs leading-relaxed" style={{ color: "var(--text-2)" }}>
-                  {item}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
+                    className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md"
+                    style={{ background: "var(--bg-0)", border: "1px solid var(--border-0)" }}
+                  >
+                    <Icon className="h-3 w-3" style={{ color: "var(--text-3)" }} />
+                  </div>
+                  <div>
+                    <code
+                      className="text-[11px] font-mono"
+                      style={{ color: "var(--text-1)" }}
+                    >
+                      {label}
+                    </code>
+                    <p className="mt-0.5 text-[11px] leading-relaxed" style={{ color: "var(--text-3)" }}>
+                      {desc}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ul>
 
-        <p className="mt-6 text-center text-[11px]" style={{ color: "var(--text-3)" }}>
-          Requires repo read/write access for webhook setup.
-        </p>
+            <p className="mt-4 text-[11px] leading-relaxed" style={{ color: "var(--text-3)" }}>
+              Private repos require{" "}
+              <code className="font-mono" style={{ color: "var(--text-2)" }}>repo</code>
+              {" "}scope (full access). Use the secondary button above.
+              We never store your code — only review metadata.
+            </p>
+          </div>
+        </div>
       </div>
     </div>
   );
