@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyWebhookSignature } from "@/lib/github";
 import { addReviewJob } from "@/lib/queue";
+import { getRedis } from "@/lib/redis";
 import { logger } from "@/lib/logger";
 
 export async function POST(req: NextRequest) {
@@ -58,6 +59,24 @@ export async function POST(req: NextRequest) {
   }
 
   const [owner, repoName] = repository.full_name.split("/");
+
+  // Rate limit: max 10 webhook events per minute per repository
+  const redis = getRedis();
+  if (redis) {
+    const rateLimitKey = `webhook:ratelimit:${repository.full_name}`;
+    try {
+      const count = await redis.incr(rateLimitKey);
+      if (count === 1) {
+        await redis.expire(rateLimitKey, 60);
+      }
+      if (count > 10) {
+        logger.warn("Webhook rate limit exceeded", { owner, repo: repoName, count });
+        return NextResponse.json({ success: false, error: "Rate limit exceeded" }, { status: 429 });
+      }
+    } catch {
+      // Redis failure is non-fatal — continue processing
+    }
+  }
 
   // Upsert PullRequest record
   const pullRequest = await prisma.pullRequest.upsert({

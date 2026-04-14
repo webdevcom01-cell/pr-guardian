@@ -1,7 +1,9 @@
 import { generateObject } from "ai";
 import { z } from "zod";
-import { getModel, getModelName } from "@/lib/ai";
+import { callWithFallback } from "@/lib/ai";
 import { getPRDiff, postPRComment, formatReviewComment } from "@/lib/github";
+import { fetchRepoConfig, applyConfig, DEFAULT_CONFIG } from "@/lib/config";
+import { indexRepository, getContextForReview } from "@/lib/embeddings";
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 
@@ -23,6 +25,95 @@ const ReviewOutputSchema = z.object({
   summary: z.string().max(500),
 });
 
+type ReviewOutput = z.infer<typeof ReviewOutputSchema>;
+
+const CHUNK_SIZE = 80_000;
+
+const SEVERITY_RANK: Record<"LOW" | "MEDIUM" | "HIGH" | "CRITICAL", number> = {
+  LOW: 0,
+  MEDIUM: 1,
+  HIGH: 2,
+  CRITICAL: 3,
+};
+
+function buildReviewSchema(maxIssues: number) {
+  return ReviewOutputSchema.extend({
+    issues: z.array(ReviewIssueSchema).max(maxIssues),
+  });
+}
+
+const DECISION_RANK: Record<ReviewOutput["decision"], number> = {
+  APPROVE: 0,
+  APPROVE_WITH_NOTES: 1,
+  BLOCK: 2,
+};
+
+export function splitDiffIntoChunks(diff: string): string[] {
+  const lines = diff.split("\n");
+  const fileSections: string[] = [];
+  let current: string[] = [];
+
+  for (const line of lines) {
+    if (line.startsWith("diff --git") && current.length > 0) {
+      fileSections.push(current.join("\n"));
+      current = [];
+    }
+    current.push(line);
+  }
+  if (current.length > 0) {
+    fileSections.push(current.join("\n"));
+  }
+
+  const chunks: string[] = [];
+  let currentChunk = "";
+
+  for (const section of fileSections) {
+    if (currentChunk.length + section.length > CHUNK_SIZE && currentChunk.length > 0) {
+      chunks.push(currentChunk);
+      currentChunk = section;
+    } else {
+      currentChunk = currentChunk.length > 0 ? `${currentChunk}\n${section}` : section;
+    }
+  }
+  if (currentChunk.length > 0) {
+    chunks.push(currentChunk);
+  }
+
+  return chunks;
+}
+
+export interface ChunkResult {
+  review: ReviewOutput;
+  chunkSize: number;
+}
+
+export function mergeReviews(results: ChunkResult[]): { review: ReviewOutput; coveragePercent: number } {
+  const totalBytes = results.reduce((sum, r) => sum + r.chunkSize, 0);
+
+  const issues = results.flatMap((r) => r.review.issues);
+
+  const weightedAvg = (field: "compositeScore" | "securityScore" | "qualityScore"): number =>
+    Math.round(results.reduce((sum, r) => sum + r.review[field] * r.chunkSize, 0) / totalBytes);
+
+  const decision = results.reduce<ReviewOutput["decision"]>((worst, r) => {
+    return DECISION_RANK[r.review.decision] > DECISION_RANK[worst] ? r.review.decision : worst;
+  }, "APPROVE");
+
+  const summary = results.map((r, i) => `**Part ${i + 1}:** ${r.review.summary}`).join("\n\n");
+
+  return {
+    review: {
+      decision,
+      compositeScore: weightedAvg("compositeScore"),
+      securityScore: weightedAvg("securityScore"),
+      qualityScore: weightedAvg("qualityScore"),
+      issues,
+      summary,
+    },
+    coveragePercent: 100,
+  };
+}
+
 const SYSTEM_PROMPT = `You are PR Guardian, an expert AI code reviewer focused on security, quality, and best practices.
 
 Review the provided git diff and output a structured review.
@@ -39,6 +130,13 @@ SCORING:
 
 Be specific: include file paths, line numbers when visible, and concrete fix instructions.
 Do NOT flag style issues unless they are project-convention violations visible in the diff.`;
+
+function buildPrompt(diff: string, context: string): string {
+  if (!context) {
+    return `Review this pull request diff:\n\n\`\`\`diff\n${diff}\n\`\`\``;
+  }
+  return `${context}\n\nNow review this pull request diff, using the codebase context above to provide more specific and relevant feedback:\n\n\`\`\`diff\n${diff}\n\`\`\``;
+}
 
 export interface ReviewJobInput {
   repoId: string;
@@ -61,51 +159,109 @@ export async function runReview(input: ReviewJobInput): Promise<string> {
     return "empty-diff";
   }
 
-  // Truncate extremely large diffs to avoid token limits
-  const wasTruncated = diff.length > 80_000;
-  const truncatedDiff = wasTruncated ? diff.slice(0, 80_000) + "\n\n[diff truncated]" : diff;
-  if (wasTruncated) {
-    logger.warn("Diff truncated for review", {
-      pullRequestId: input.pullRequestId,
-      originalLength: diff.length,
-    });
+  // 2. Load per-repo config and apply path filters
+  const config = await fetchRepoConfig(input.owner, input.repo, input.userToken);
+  const filteredDiff = applyConfig(config, diff);
+
+  if (!filteredDiff || filteredDiff.trim().length === 0) {
+    logger.info("All files filtered by config, skipping review", { pullRequestId: input.pullRequestId });
+    return "filtered-diff";
   }
 
-  // 2. Run AI review
-  const model = getModel();
-  const { object } = await generateObject({
-    model,
-    schema: ReviewOutputSchema,
-    system: SYSTEM_PROMPT,
-    prompt: `Review this pull request diff:\n\n\`\`\`diff\n${truncatedDiff}\n\`\`\``,
-    temperature: 0.1,
-  });
+  // 3. Retrieve relevant codebase context for this diff
+  const contextStr = await getContextForReview(input.repoId, filteredDiff, input.userToken).catch(() => "");
+
+  // Fire-and-forget background re-indexing (non-blocking)
+  indexRepository(input.repoId, input.owner, input.repo, input.userToken).catch((err) =>
+    logger.warn("Background repo indexing failed", {
+      repoId: input.repoId,
+      error: err instanceof Error ? err.message : String(err),
+    })
+  );
+
+  // 4. Run AI review — chunked in parallel for large diffs
+  const reviewSchema = buildReviewSchema(config.maxIssues ?? DEFAULT_CONFIG.maxIssues);
+  let finalReview: ReviewOutput;
+  let coveragePercent = 100;
+  let usedModel: string;
+
+  if (filteredDiff.length <= CHUNK_SIZE) {
+    const { result: { object }, modelId } = await callWithFallback(
+      (model) => generateObject({
+        model,
+        schema: reviewSchema,
+        system: SYSTEM_PROMPT,
+        prompt: buildPrompt(filteredDiff, contextStr),
+        temperature: 0.1,
+      }),
+      config.model,
+    );
+    finalReview = object;
+    usedModel = modelId;
+  } else {
+    const chunks = splitDiffIntoChunks(filteredDiff);
+    logger.info("Reviewing large diff in parallel chunks", {
+      pullRequestId: input.pullRequestId,
+      totalBytes: filteredDiff.length,
+      chunkCount: chunks.length,
+    });
+
+    const chunkResults = await Promise.all(
+      chunks.map((chunk, i) =>
+        callWithFallback(
+          (model) => generateObject({
+            model,
+            schema: reviewSchema,
+            system: SYSTEM_PROMPT,
+            prompt: buildPrompt(chunk, contextStr),
+            temperature: 0.1,
+          }),
+          config.model,
+        ).then(({ result: { object }, modelId }) => ({ review: object, chunkSize: chunk.length, modelId })),
+      ),
+    );
+
+    const merged = mergeReviews(chunkResults);
+    finalReview = merged.review;
+    coveragePercent = merged.coveragePercent;
+    usedModel = chunkResults[0].modelId;
+  }
+
+  // Filter issues below configured severity threshold
+  const threshold = SEVERITY_RANK[config.severityThreshold ?? DEFAULT_CONFIG.severityThreshold];
+  finalReview = {
+    ...finalReview,
+    issues: finalReview.issues.filter((issue) => SEVERITY_RANK[issue.severity] >= threshold),
+  };
 
   const durationMs = Date.now() - startedAt;
 
-  // 3. Persist review
+  // 5. Persist review
   const review = await prisma.review.create({
     data: {
       pullRequestId: input.pullRequestId,
-      decision: object.decision,
-      compositeScore: object.compositeScore,
-      securityScore: object.securityScore,
-      qualityScore: object.qualityScore,
-      issues: object.issues,
-      summary: object.summary,
+      decision: finalReview.decision,
+      compositeScore: finalReview.compositeScore,
+      securityScore: finalReview.securityScore,
+      qualityScore: finalReview.qualityScore,
+      issues: finalReview.issues,
+      summary: finalReview.summary,
       durationMs,
-      modelUsed: getModelName(),
+      modelUsed: usedModel,
     },
   });
 
-  // 4. Post comment to GitHub
+  // 6. Post comment to GitHub
   const commentBody = formatReviewComment({
-    decision: object.decision,
-    compositeScore: object.compositeScore,
-    securityScore: object.securityScore,
-    qualityScore: object.qualityScore,
-    summary: object.summary,
-    issues: object.issues,
+    decision: finalReview.decision,
+    compositeScore: finalReview.compositeScore,
+    securityScore: finalReview.securityScore,
+    qualityScore: finalReview.qualityScore,
+    summary: finalReview.summary,
+    issues: finalReview.issues,
+    coveragePercent,
+    totalBytes: diff.length,
+    reviewedBytes: diff.length,
   });
 
   const commentId = await postPRComment(
@@ -116,7 +272,7 @@ export async function runReview(input: ReviewJobInput): Promise<string> {
     input.userToken,
   );
 
-  // 5. Save comment ID back to review
+  // 7. Save comment ID back to review
   await prisma.review.update({
     where: { id: review.id },
     data: { githubCommentId: commentId },

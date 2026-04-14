@@ -90,6 +90,65 @@ export function verifyWebhookSignature(
   }
 }
 
+const SKIP_PATH_PATTERNS = [
+  /^node_modules\//,
+  /^dist\//,
+  /^\.git\//,
+  /^build\//,
+  /^coverage\//,
+  /\.lock$/,
+  /\.min\.js$/,
+  /\.min\.css$/,
+  /\.map$/,
+  /\.snap$/,
+  /\.(png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot|pdf|zip)$/i,
+];
+
+function shouldSkipPath(path: string): boolean {
+  return SKIP_PATH_PATTERNS.some((pattern) => pattern.test(path));
+}
+
+/** Fetch all blob paths in a repo tree (HEAD), filtered to indexable files */
+export async function getRepoTree(
+  owner: string,
+  repo: string,
+  token?: string,
+): Promise<Array<{ path: string; size?: number }>> {
+  const octokit = getOctokit(token);
+  const response = await octokit.git.getTree({
+    owner,
+    repo,
+    tree_sha: "HEAD",
+    recursive: "1",
+  });
+
+  return response.data.tree
+    .filter((item) => item.type === "blob" && item.path && !shouldSkipPath(item.path))
+    .slice(0, 300)
+    .map((item) => ({ path: item.path as string, size: item.size }));
+}
+
+/** Fetch raw UTF-8 content of a single file, returns null if too large or not a file */
+export async function getFileContent(
+  owner: string,
+  repo: string,
+  path: string,
+  token?: string,
+): Promise<string | null> {
+  try {
+    const octokit = getOctokit(token);
+    const response = await octokit.repos.getContent({ owner, repo, path });
+    const file = response.data;
+
+    if (Array.isArray(file) || file.type !== "file") return null;
+    if (file.size > 50_000) return null;
+
+    return Buffer.from(file.content, "base64").toString("utf-8");
+  } catch {
+    return null;
+  }
+}
+
 /** Format a review comment as Markdown for GitHub */
 export function formatReviewComment(review: {
   decision: string;
@@ -105,6 +164,9 @@ export function formatReviewComment(review: {
     message: string;
     fix: string;
   }>;
+  coveragePercent?: number;
+  reviewedBytes?: number;
+  totalBytes?: number;
 }): string {
   const icon =
     review.decision === "APPROVE" ? "✅" :
@@ -118,7 +180,12 @@ export function formatReviewComment(review: {
   const criticalIssues = review.issues.filter((i) => i.severity === "CRITICAL" || i.severity === "HIGH");
   const otherIssues = review.issues.filter((i) => i.severity !== "CRITICAL" && i.severity !== "HIGH");
 
-  let comment = `## ${icon} PR Guardian Review — ${review.decision.replace(/_/g, " ")}
+  const coverageWarning =
+    review.coveragePercent !== undefined && review.coveragePercent < 100
+      ? `⚠️ **Partial review** — ${review.coveragePercent}% of diff analyzed (${review.reviewedBytes} of ${review.totalBytes} bytes). Large binary or generated files were skipped.\n\n`
+      : "";
+
+  let comment = `${coverageWarning}## ${icon} PR Guardian Review — ${review.decision.replace(/_/g, " ")}
 
 ${review.summary}
 

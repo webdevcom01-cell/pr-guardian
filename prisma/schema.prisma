@@ -40,9 +40,24 @@ model Repository {
   updatedAt     DateTime @updatedAt
 
   pullRequests PullRequest[]
+  repoIndex    RepoIndex[]
 
   @@index([userId])
   @@index([fullName])
+}
+
+model RepoIndex {
+  id        String     @id @default(cuid())
+  repoId    String
+  repo      Repository @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  filePath  String
+  content   String     @db.Text
+  embedding Unsupported("vector(1536)")?
+  commitSha String
+  indexedAt DateTime   @default(now())
+
+  @@unique([repoId, filePath])
+  @@index([repoId])
 }
 
 model PullRequest {
