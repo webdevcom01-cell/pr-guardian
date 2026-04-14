@@ -1,6 +1,4 @@
-# Railway Nixpacks config — fix Tailwind v4 native bindings (oxide)
-# Must use --no-frozen-lockfile after adding public-hoist-pattern to .npmrc
-
+# Railway Nixpacks config for pr-guardian (Next.js 15 + Tailwind v3)
 [phases.install]
 cmds = ["pnpm install --no-frozen-lockfile"]
 
