@@ -1,0 +1,20 @@
+# Code owners are automatically requested for review on PRs
+# that touch files they own.
+#
+# Format: pattern  @owner
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for everything
+* @webdevcom01-cell
+
+# Core review pipeline — requires extra care
+src/lib/reviewer.ts           @webdevcom01-cell
+src/lib/ai.ts                 @webdevcom01-cell
+src/app/api/webhooks/         @webdevcom01-cell
+
+# Auth and security
+src/lib/auth.ts               @webdevcom01-cell
+src/middleware.ts             @webdevcom01-cell
+
+# Database schema
+prisma/schema.prisma          @webdevcom01-cell
