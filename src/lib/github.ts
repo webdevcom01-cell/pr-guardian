@@ -149,25 +149,39 @@ export async function getFileContent(
   }
 }
 
+export interface IncrementalSummary {
+  isFollowUp: boolean;
+  previousScore: number;
+  scoreDelta: number;
+  resolvedCount: number;
+  newCount: number;
+  persistingCount: number;
+  resolvedIssues: Array<{ file: string; message: string; severity: string }>;
+  newIssues: Array<{ file: string; message: string; severity: string }>;
+}
+
 /** Format a review comment as Markdown for GitHub */
-export function formatReviewComment(review: {
-  decision: string;
-  compositeScore: number;
-  securityScore: number;
-  qualityScore: number;
-  summary: string;
-  issues: Array<{
-    severity: string;
-    category: string;
-    file: string;
-    line?: number;
-    message: string;
-    fix: string;
-  }>;
-  coveragePercent?: number;
-  reviewedBytes?: number;
-  totalBytes?: number;
-}): string {
+export function formatReviewComment(
+  review: {
+    decision: string;
+    compositeScore: number;
+    securityScore: number;
+    qualityScore: number;
+    summary: string;
+    issues: Array<{
+      severity: string;
+      category: string;
+      file: string;
+      line?: number;
+      message: string;
+      fix: string;
+    }>;
+    coveragePercent?: number;
+    reviewedBytes?: number;
+    totalBytes?: number;
+  },
+  incrementalSummary?: IncrementalSummary,
+): string {
   const icon =
     review.decision === "APPROVE" ? "✅" :
     review.decision === "APPROVE_WITH_NOTES" ? "⚠️" : "🚫";
@@ -185,7 +199,38 @@ export function formatReviewComment(review: {
       ? `⚠️ **Partial review** — ${review.coveragePercent}% of diff analyzed (${review.reviewedBytes} of ${review.totalBytes} bytes). Large binary or generated files were skipped.\n\n`
       : "";
 
-  let comment = `${coverageWarning}## ${icon} PR Guardian Review — ${review.decision.replace(/_/g, " ")}
+  let progressSection = "";
+  if (incrementalSummary?.isFollowUp) {
+    const { resolvedCount, newCount, persistingCount, scoreDelta, resolvedIssues, newIssues } = incrementalSummary;
+    const deltaStr = scoreDelta > 0 ? `+${scoreDelta}` : String(scoreDelta);
+
+    progressSection = `## 📊 Progress since last review
+| | Count |
+|---|---|
+| ✅ Resolved | ${resolvedCount} |
+| 🆕 New | ${newCount} |
+| 🔄 Persisting | ${persistingCount} |
+| Score change | ${deltaStr} |
+`;
+
+    if (resolvedIssues.length > 0) {
+      progressSection += `\n**Resolved:**\n`;
+      for (const issue of resolvedIssues.slice(0, 5)) {
+        progressSection += `- \`${issue.file}\` — ${issue.message} (${issue.severity})\n`;
+      }
+    }
+
+    if (newIssues.length > 0) {
+      progressSection += `\n**New issues:**\n`;
+      for (const issue of newIssues.slice(0, 5)) {
+        progressSection += `- \`${issue.file}\` — ${issue.message} (${issue.severity})\n`;
+      }
+    }
+
+    progressSection += `\n---\n\n`;
+  }
+
+  let comment = `${coverageWarning}${progressSection}## ${icon} PR Guardian Review — ${review.decision.replace(/_/g, " ")}
 
 ${review.summary}
 

@@ -1,7 +1,8 @@
 import { generateObject } from "ai";
 import { z } from "zod";
+import type { Prisma } from "@/generated/prisma";
 import { callWithFallback } from "@/lib/ai";
-import { getPRDiff, postPRComment, formatReviewComment } from "@/lib/github";
+import { getPRDiff, postPRComment, formatReviewComment, type IncrementalSummary } from "@/lib/github";
 import { fetchRepoConfig, applyConfig, DEFAULT_CONFIG } from "@/lib/config";
 import { indexRepository, getContextForReview } from "@/lib/embeddings";
 import { prisma } from "@/lib/prisma";
@@ -28,6 +29,17 @@ const ReviewOutputSchema = z.object({
 type ReviewOutput = z.infer<typeof ReviewOutputSchema>;
 
 const CHUNK_SIZE = 80_000;
+
+function parseIssues(raw: Prisma.JsonValue): Array<{ file: string; message: string; severity: string }> {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (item): item is { file: string; message: string; severity: string } =>
+      typeof item === "object" &&
+      item !== null &&
+      typeof (item as Record<string, unknown>).file === "string" &&
+      typeof (item as Record<string, unknown>).message === "string",
+  );
+}
 
 const SEVERITY_RANK: Record<"LOW" | "MEDIUM" | "HIGH" | "CRITICAL", number> = {
   LOW: 0,
@@ -234,6 +246,47 @@ export async function runReview(input: ReviewJobInput): Promise<string> {
     issues: finalReview.issues.filter((issue) => SEVERITY_RANK[issue.severity] >= threshold),
   };
 
+  // Compute incremental diff against the most recent previous review for this PR
+  const previousReview = await prisma.review.findFirst({
+    where: {
+      pullRequest: {
+        repoId: input.repoId,
+        prNumber: input.prNumber,
+      },
+      NOT: { pullRequestId: input.pullRequestId },
+    },
+    orderBy: { createdAt: "desc" },
+    include: { pullRequest: true },
+  });
+
+  let incrementalSummary: IncrementalSummary | undefined;
+
+  if (previousReview) {
+    const prevIssues = parseIssues(previousReview.issues);
+    const currIssues = finalReview.issues.map((i) => ({ file: i.file, message: i.message, severity: i.severity }));
+
+    const issueKey = (issue: { file: string; message: string }): string =>
+      `${issue.file}::${issue.message.trim().toLowerCase()}`;
+
+    const prevKeys = new Set(prevIssues.map(issueKey));
+    const currKeys = new Set(currIssues.map(issueKey));
+
+    const resolvedIssues = prevIssues.filter((i) => !currKeys.has(issueKey(i)));
+    const newIssues = currIssues.filter((i) => !prevKeys.has(issueKey(i)));
+    const persistingCount = currIssues.filter((i) => prevKeys.has(issueKey(i))).length;
+
+    incrementalSummary = {
+      isFollowUp: true,
+      previousScore: previousReview.compositeScore,
+      scoreDelta: finalReview.compositeScore - previousReview.compositeScore,
+      resolvedCount: resolvedIssues.length,
+      newCount: newIssues.length,
+      persistingCount,
+      resolvedIssues,
+      newIssues,
+    };
+  }
+
   const durationMs = Date.now() - startedAt;
 
   // 5. Persist review
@@ -252,17 +305,20 @@ export async function runReview(input: ReviewJobInput): Promise<string> {
   });
 
   // 6. Post comment to GitHub
-  const commentBody = formatReviewComment({
-    decision: finalReview.decision,
-    compositeScore: finalReview.compositeScore,
-    securityScore: finalReview.securityScore,
-    qualityScore: finalReview.qualityScore,
-    summary: finalReview.summary,
-    issues: finalReview.issues,
-    coveragePercent,
-    totalBytes: diff.length,
-    reviewedBytes: diff.length,
-  });
+  const commentBody = formatReviewComment(
+    {
+      decision: finalReview.decision,
+      compositeScore: finalReview.compositeScore,
+      securityScore: finalReview.securityScore,
+      qualityScore: finalReview.qualityScore,
+      summary: finalReview.summary,
+      issues: finalReview.issues,
+      coveragePercent,
+      totalBytes: diff.length,
+      reviewedBytes: diff.length,
+    },
+    incrementalSummary,
+  );
 
   const commentId = await postPRComment(
     input.owner,
