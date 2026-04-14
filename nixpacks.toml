@@ -1,0 +1,8 @@
+# Railway Nixpacks config — fix Tailwind v4 native bindings (oxide)
+# Must use --no-frozen-lockfile after adding public-hoist-pattern to .npmrc
+
+[phases.install]
+cmds = ["pnpm install --no-frozen-lockfile"]
+
+[phases.build]
+cmds = ["pnpm run build"]
