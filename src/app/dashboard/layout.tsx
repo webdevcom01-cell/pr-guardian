@@ -13,16 +13,27 @@ const NAV = [
 function Sidebar() {
   const path = usePathname();
   return (
-    <aside className="flex h-screen w-60 shrink-0 flex-col border-r border-zinc-800/60 bg-zinc-900">
+    <aside
+      className="flex h-screen w-56 shrink-0 flex-col"
+      style={{
+        background: "#0a0a0a",
+        borderRight: "1px solid rgba(255,255,255,0.05)",
+      }}
+    >
       {/* Logo */}
-      <div className="flex items-center gap-3 border-b border-zinc-800/60 px-5 py-5">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-violet-600 shadow-sm shadow-violet-600/40">
-          <Shield className="h-4 w-4 text-white" />
+      <div
+        className="flex items-center gap-3 px-5 py-5"
+        style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}
+      >
+        <div
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white"
+          style={{ boxShadow: "0 2px 8px rgba(0,0,0,0.5)" }}
+        >
+          <Shield className="h-3.5 w-3.5 text-black" />
         </div>
-        <div>
-          <p className="text-sm font-semibold leading-none text-zinc-100">PR Guardian</p>
-          <p className="mt-0.5 text-[10px] font-medium uppercase tracking-widest text-violet-400">AI Review</p>
-        </div>
+        <span className="text-sm font-semibold tracking-tight text-white">
+          PR Guardian
+        </span>
       </div>
 
       {/* Nav */}
@@ -34,21 +45,21 @@ function Sidebar() {
               key={href}
               href={href}
               className={cn(
-                "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150",
+                "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-all duration-150",
                 active
-                  ? "bg-violet-600/15 text-violet-300"
-                  : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+                  ? "bg-white/10 text-white font-medium"
+                  : "text-zinc-500 hover:bg-white/5 hover:text-zinc-200"
               )}
             >
               <Icon
                 className={cn(
-                  "h-4 w-4 shrink-0 transition-colors",
-                  active ? "text-violet-400" : "text-zinc-500 group-hover:text-zinc-300"
+                  "h-4 w-4 shrink-0",
+                  active ? "text-white" : "text-zinc-600 group-hover:text-zinc-400"
                 )}
               />
               {label}
               {active && (
-                <span className="ml-auto h-1.5 w-1.5 rounded-full bg-violet-400" />
+                <span className="ml-auto h-1 w-1 rounded-full bg-white opacity-60" />
               )}
             </Link>
           );
@@ -56,12 +67,15 @@ function Sidebar() {
       </nav>
 
       {/* Sign out */}
-      <div className="border-t border-zinc-800/60 p-3">
+      <div
+        className="p-3"
+        style={{ borderTop: "1px solid rgba(255,255,255,0.04)" }}
+      >
         <button
           onClick={() => signOut({ callbackUrl: "/login" })}
-          className="group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-zinc-500 transition-all duration-150 hover:bg-zinc-800 hover:text-zinc-300"
+          className="group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-zinc-600 transition-all duration-150 hover:bg-white/5 hover:text-zinc-300"
         >
-          <LogOut className="h-4 w-4 shrink-0 transition-colors group-hover:text-zinc-300" />
+          <LogOut className="h-4 w-4 shrink-0 group-hover:text-zinc-400" />
           Sign out
         </button>
       </div>
@@ -71,10 +85,10 @@ function Sidebar() {
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex h-screen overflow-hidden bg-zinc-950">
+    <div className="flex h-screen overflow-hidden" style={{ background: "#000" }}>
       <Sidebar />
       <main className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-5xl p-8">{children}</div>
+        <div className="mx-auto max-w-4xl px-8 py-10">{children}</div>
       </main>
     </div>
   );

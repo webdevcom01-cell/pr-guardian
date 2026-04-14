@@ -1,5 +1,5 @@
-/* IBM Plex Sans — must be first @import per CSS spec */
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+/* IBM Plex Sans — must be first */
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -8,25 +8,56 @@
 @layer base {
   :root {
     --font-sans: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
-    --font-mono: 'IBM Plex Mono', monospace;
+    --font-mono: 'IBM Plex Mono', 'Fira Code', monospace;
   }
+
+  * { box-sizing: border-box; }
 
   html {
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    letter-spacing: -0.01em;
   }
 
   body {
-    @apply bg-zinc-950 text-zinc-100;
+    background: #000;
+    color: #e4e4e7;
   }
 
-  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  /* Elegant minimal scrollbar */
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
   ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { @apply bg-zinc-700 rounded; }
-  ::-webkit-scrollbar-thumb:hover { @apply bg-zinc-600; }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 2px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
 
+  /* Clean focus ring */
   :focus-visible {
-    @apply outline-none ring-2 ring-violet-500 ring-offset-2 ring-offset-zinc-950;
+    outline: 1.5px solid rgba(255,255,255,0.5);
+    outline-offset: 3px;
+    border-radius: 4px;
+  }
+}
+
+@layer utilities {
+  .text-balance { text-wrap: balance; }
+
+  /* Card shadow — deep black lift */
+  .shadow-card {
+    box-shadow:
+      0 0 0 1px rgba(255,255,255,0.05),
+      0 2px 4px rgba(0,0,0,0.4),
+      0 8px 24px rgba(0,0,0,0.5);
+  }
+
+  /* Inset top highlight — glass effect */
+  .highlight-top {
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+  }
+
+  /* Number font */
+  .font-tabular {
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.03em;
   }
 }
