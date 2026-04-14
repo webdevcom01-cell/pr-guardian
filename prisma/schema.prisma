@@ -52,7 +52,8 @@ model RepoIndex {
   repo      Repository @relation(fields: [repoId], references: [id], onDelete: Cascade)
   filePath  String
   content   String     @db.Text
-  embedding Unsupported("vector(1536)")?
+  // embedding column (vector(1536)) is managed via raw SQL in ensureVectorExtension()
+  // Prisma does not support pgvector natively — column added at runtime via ALTER TABLE
   commitSha String
   indexedAt DateTime   @default(now())
 

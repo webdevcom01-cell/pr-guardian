@@ -47,13 +47,21 @@ function scoreFile(filePath: string): number {
 }
 
 export async function ensureVectorExtension(): Promise<void> {
-  // TODO: requires pgvector extension on PostgreSQL (pre-installed on Railway)
-  // The CREATE EXTENSION call will handle setup at runtime
+  // Prisma does not support pgvector natively so the embedding column
+  // is created here at runtime via raw SQL (Railway PostgreSQL has pgvector pre-installed).
   try {
     await prisma.$executeRaw`CREATE EXTENSION IF NOT EXISTS vector`;
-    await prisma.$executeRaw`CREATE INDEX IF NOT EXISTS repo_index_embedding_idx ON "RepoIndex" USING hnsw (embedding vector_cosine_ops)`;
+    // Add embedding column if it doesn't exist yet (idempotent)
+    await prisma.$executeRaw`
+      ALTER TABLE "RepoIndex"
+      ADD COLUMN IF NOT EXISTS embedding vector(1536)
+    `;
+    await prisma.$executeRaw`
+      CREATE INDEX IF NOT EXISTS repo_index_embedding_idx
+      ON "RepoIndex" USING hnsw (embedding vector_cosine_ops)
+    `;
   } catch {
-    // Extension may already exist or not yet available — non-fatal
+    // Non-fatal — extension or column may already exist, or pgvector unavailable locally
   }
 }
 
