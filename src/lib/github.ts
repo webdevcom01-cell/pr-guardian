@@ -149,6 +149,34 @@ export async function getFileContent(
   }
 }
 
+export type CommitStatusState = "pending" | "success" | "failure" | "error";
+
+/**
+ * Create or update a GitHub commit status (the ✅/❌ check shown on a PR).
+ * context = "pr-guardian/review" — appears as a required check in branch protection rules.
+ * description is capped at 140 chars (GitHub limit).
+ */
+export async function createCommitStatus(
+  owner: string,
+  repo: string,
+  sha: string,
+  state: CommitStatusState,
+  description: string,
+  targetUrl?: string,
+  token?: string,
+): Promise<void> {
+  const octokit = getOctokit(token);
+  await octokit.repos.createCommitStatus({
+    owner,
+    repo,
+    sha,
+    state,
+    description: description.slice(0, 140),
+    context: "pr-guardian/review",
+    ...(targetUrl ? { target_url: targetUrl } : {}),
+  });
+}
+
 export interface IncrementalSummary {
   isFollowUp: boolean;
   previousScore: number;

@@ -2,7 +2,7 @@ import { generateObject } from "ai";
 import { z } from "zod";
 import type { Prisma } from "@/generated/prisma";
 import { callWithFallback } from "@/lib/ai";
-import { getPRDiff, postPRComment, formatReviewComment, type IncrementalSummary } from "@/lib/github";
+import { getPRDiff, postPRComment, formatReviewComment, createCommitStatus, type IncrementalSummary } from "@/lib/github";
 import { fetchRepoConfig, applyConfig, DEFAULT_CONFIG } from "@/lib/config";
 import { indexRepository, getContextForReview } from "@/lib/embeddings";
 import { prisma } from "@/lib/prisma";
@@ -160,9 +160,60 @@ export interface ReviewJobInput {
   userToken?: string;
 }
 
+const APP_URL = process.env.APP_URL ?? "";
+
 export async function runReview(input: ReviewJobInput): Promise<string> {
   const startedAt = Date.now();
 
+  // Set pending status immediately so the PR shows "Review in progress"
+  await createCommitStatus(
+    input.owner,
+    input.repo,
+    input.headSha,
+    "pending",
+    "PR Guardian is reviewing your changes…",
+    APP_URL ? `${APP_URL}/dashboard` : undefined,
+    input.userToken,
+  ).catch((err) =>
+    logger.warn("Failed to set pending commit status", {
+      pullRequestId: input.pullRequestId,
+      error: err instanceof Error ? err.message : String(err),
+    })
+  );
+
+  try {
+    const result = await _runReview(input, startedAt);
+
+    // Early exits (empty/filtered diff) — resolve the pending status so PR check doesn't hang
+    if (result === "empty-diff" || result === "filtered-diff") {
+      await createCommitStatus(
+        input.owner,
+        input.repo,
+        input.headSha,
+        "success",
+        result === "empty-diff" ? "No changes to review" : "All files excluded by .pr-guardian.yml",
+        APP_URL ? `${APP_URL}/dashboard` : undefined,
+        input.userToken,
+      ).catch(() => undefined);
+    }
+
+    return result;
+  } catch (err) {
+    // Set error status so the PR check doesn't stay "pending" forever
+    await createCommitStatus(
+      input.owner,
+      input.repo,
+      input.headSha,
+      "error",
+      "PR Guardian encountered an error. Please retry.",
+      APP_URL ? `${APP_URL}/dashboard` : undefined,
+      input.userToken,
+    ).catch(() => undefined); // best-effort, never throw
+    throw err;
+  }
+}
+
+async function _runReview(input: ReviewJobInput, startedAt: number): Promise<string> {
   // 1. Fetch the diff
   const diff = await getPRDiff(input.owner, input.repo, input.prNumber, input.userToken);
 
@@ -333,6 +384,33 @@ export async function runReview(input: ReviewJobInput): Promise<string> {
     where: { id: review.id },
     data: { githubCommentId: commentId },
   });
+
+  // 8. Set final commit status — this is what shows as ✅ or ❌ on the PR
+  const isBlocked = finalReview.decision === "BLOCK";
+  const criticalCount = finalReview.issues.filter(
+    (i) => i.severity === "CRITICAL" || i.severity === "HIGH",
+  ).length;
+
+  const statusDescription = isBlocked
+    ? `Blocked — ${criticalCount} critical/high issue(s) · score ${finalReview.compositeScore}/100`
+    : finalReview.decision === "APPROVE_WITH_NOTES"
+      ? `Approved with notes · score ${finalReview.compositeScore}/100`
+      : `Approved · score ${finalReview.compositeScore}/100`;
+
+  await createCommitStatus(
+    input.owner,
+    input.repo,
+    input.headSha,
+    isBlocked ? "failure" : "success",
+    statusDescription,
+    APP_URL ? `${APP_URL}/dashboard` : undefined,
+    input.userToken,
+  ).catch((err) =>
+    logger.warn("Failed to set final commit status", {
+      reviewId: review.id,
+      error: err instanceof Error ? err.message : String(err),
+    })
+  );
 
   return review.id;
 }
